@@ -35,8 +35,11 @@ import zipfile
 FORMAT = 1
 # Indicator files that must never be published: they describe one person's Mac.
 PRIVATE_INDICATORS = {"allowlist.local.ioc"}
-NAME_OK = re.compile(r"^[^\s\x00-\x20\x7f]+$")
-VERSION_OK = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_~!-]*$")
+# Always used with fullmatch: "$" would also accept a trailing newline, and a
+# newline in a name or version would start a line of its own in the list.
+NAME_OK = re.compile(r"[^\s\x00-\x20\x7f]+")
+VERSION_OK = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_~!-]*")
+ID_OK = re.compile(r"MAL-[0-9]{4}-[0-9]+")
 
 
 def normalise(ecosystem, name):
@@ -66,14 +69,14 @@ def collect(zip_path, ecosystem):
                     skipped["other_ecosystem"] += 1
                     continue
                 name = normalise(ecosystem, package.get("name", ""))
-                if not NAME_OK.match(name) or "\t" in name:
+                if not NAME_OK.fullmatch(name) or "\t" in name:
                     skipped["bad_name"] += 1
                     continue
                 every = False
                 versions = set()
                 ranges = set()
                 for version in affected.get("versions", []) or []:
-                    if VERSION_OK.match(version) and "," not in version:
+                    if VERSION_OK.fullmatch(version) and "," not in version:
                         versions.add(version)
                     else:
                         skipped["bad_version"] += 1
@@ -86,7 +89,7 @@ def collect(zip_path, ecosystem):
                             floor = event["introduced"]
                         elif "fixed" in event and floor is not None:
                             ceiling = event["fixed"]
-                            if VERSION_OK.match(ceiling) and (floor == "0" or VERSION_OK.match(floor)):
+                            if VERSION_OK.fullmatch(ceiling) and (floor == "0" or VERSION_OK.fullmatch(floor)):
                                 ranges.add(">=%s<%s" % ("0" if floor == "0" else floor, ceiling))
                             floor = None
                         elif "last_affected" in event and floor is not None:
@@ -95,7 +98,7 @@ def collect(zip_path, ecosystem):
                             floor = None
                     if floor == "0":
                         every = True
-                    elif floor is not None and VERSION_OK.match(floor):
+                    elif floor is not None and VERSION_OK.fullmatch(floor):
                         ranges.add(">=" + floor)
                 if not every and not versions and not ranges:
                     skipped["empty"] += 1
@@ -104,7 +107,9 @@ def collect(zip_path, ecosystem):
                 slot["every"] = slot["every"] or every
                 slot["versions"] |= versions
                 slot["ranges"] |= ranges
-                slot["ids"].add(record.get("id", ""))
+                identifier = record.get("id", "")
+                if isinstance(identifier, str) and ID_OK.fullmatch(identifier):
+                    slot["ids"].add(identifier)
     return found, skipped
 
 
