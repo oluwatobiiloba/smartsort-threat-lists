@@ -19,7 +19,16 @@ Malicious packages (malicious-npm.*.txt.gz, malicious-pypi.*.txt.gz)
 
 Indicators (*.ioc)
   Written for SmartSort and its sister tool from public write-ups of
-  particular attacks. Each line names what it is and where it was described.
+  particular attacks. Each line names what it is and the attack it belongs
+  to.
+
+Malware rules (rules.*.yar.gz)
+  Taken from YARA Forge's core package, https://github.com/YARAHQ/yara-forge.
+  Only rules whose source licence is the Detection Rule License 1.1, BSD
+  2-Clause, Apache 2.0 or MIT are included. Each source's name, address and
+  full licence text are at the top of the rules file, and every rule keeps its
+  author and licence fields. Rules that only work on Windows programs, and
+  rules found to match ordinary files, are left out.
 
 A list is a record of what has been reported, not a guarantee. A package
 that is not listed has not been shown to be safe, and a listing can be wrong.

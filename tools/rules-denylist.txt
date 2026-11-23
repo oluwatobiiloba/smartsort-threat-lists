@@ -1,0 +1,11 @@
+# Malware rules left out of the published rules file, whatever the package says.
+#
+# One rule per line: its name, then why it is left out. A line that starts
+# with # is a comment. build_rules.py refuses an entry with no reason, and
+# warns about a name the package no longer has.
+#
+# To pull a rule the same day: add its name here with the reason, push to
+# main, and run the "Publish lists" workflow by hand.
+#
+# Rules that match files on a Mac are listed here, because the nightly build
+# runs on Linux and cannot see those files.

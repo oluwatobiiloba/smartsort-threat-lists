@@ -6,8 +6,9 @@
 #      `main`, with the secret LISTS_SIGNING_KEY (the Ed25519 private key, PEM).
 #   3. Settings > Secrets and variables > Actions: the secret IOC_DEPLOY_KEY, a
 #      read-only deploy key for the private repository that holds the curated
-#      indicators, and the variable INDICATOR_REPOSITORY, that repository's
-#      owner/name (kept out of this public file).
+#      indicators, and the secret INDICATOR_REPOSITORY, that repository's
+#      owner/name. A secret, not a variable: secrets are masked in the public
+#      log, and actions/checkout prints the repository it checks out.
 name: Publish lists
 
 on:
@@ -36,14 +37,18 @@ jobs:
 
       - name: Check the setup
         # Left empty, the next step would quietly check out this repository instead.
+        # The secret is masked as a whole; the name alone is masked here too, for the rest of the job.
         env:
-          INDICATOR_REPOSITORY: ${{ vars.INDICATOR_REPOSITORY }}
-        run: test -n "$INDICATOR_REPOSITORY" || { echo "::error::The variable INDICATOR_REPOSITORY is not set"; exit 1; }
+          INDICATOR_REPOSITORY: ${{ secrets.INDICATOR_REPOSITORY }}
+        run: |
+          test -n "$INDICATOR_REPOSITORY" || { echo "::error::The secret INDICATOR_REPOSITORY is not set"; exit 1; }
+          echo "::add-mask::$INDICATOR_REPOSITORY"
+          echo "::add-mask::${INDICATOR_REPOSITORY#*/}"
 
       - name: Fetch the curated indicators (read-only)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          repository: ${{ vars.INDICATOR_REPOSITORY }}
+          repository: ${{ secrets.INDICATOR_REPOSITORY }}
           ref: main
           ssh-key: ${{ secrets.IOC_DEPLOY_KEY }}
           path: indicator-source
@@ -56,13 +61,50 @@ jobs:
           curl --fail --silent --show-error --location --retry 3 --max-filesize 1500000000 -o osv/npm/all.zip "$OSV_NPM"
           curl --fail --silent --show-error --location --retry 3 --max-filesize 1500000000 -o osv/pypi/all.zip "$OSV_PYPI"
 
+      - name: Fetch the rule package
+        # YARA Forge's "core" package. Its release tag is kept for the rule file's header.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p forge
+          # The tag first, then that exact release, so a release made in between cannot mix the two.
+          gh release view --repo YARAHQ/yara-forge --json tagName --jq .tagName > forge/release.txt
+          # The tag is downloaded text that ends up in a command line and a comment: one plain word only.
+          tag=$(cat forge/release.txt)
+          [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::The rule package's release tag is not a plain name"; exit 1; }
+          gh release download "$(cat forge/release.txt)" --repo YARAHQ/yara-forge --pattern yara-forge-rules-core.zip --dir forge
+
+      - name: Check and build the rules
+        # The wheel is pinned by hash. -I: nothing is read from the folders the downloads are in.
+        # --benign: a rule that matches any of the runner's own programs and libraries is left out.
+        # They are scanned in this order up to 20,000 files and 2 GB, so the largest folder is last.
+        # Rules that match files on a Mac, which this runner cannot see, go in tools/rules-denylist.txt.
+        run: |
+          python3 -m venv rules-venv
+          rules-venv/bin/pip install --require-hashes --only-binary=:all: -r tools/requirements-rules.txt
+          site_packages=$(rules-venv/bin/python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')
+          mkdir -p rules
+          rules-venv/bin/python -I tools/build_rules.py \
+            --forge forge/yara-forge-rules-core.zip \
+            --out rules/rules.yar \
+            --forge-release "$(cat forge/release.txt)" \
+            --check \
+            --benign "$site_packages" \
+            --benign /usr/bin \
+            --benign /usr/sbin \
+            --benign /usr/lib/x86_64-linux-gnu
+
       - name: Build the lists
         # -I: the script is run without reading anything from the folders the downloads are in.
+        # The private repository's name, so the build can refuse to publish a file that gives it.
+        env:
+          INDICATOR_REPOSITORY: ${{ secrets.INDICATOR_REPOSITORY }}
         run: |
           python3 -I tools/build_lists.py \
             --npm osv/npm/all.zip --pypi osv/pypi/all.zip \
             --indicators indicator-source/iocs \
             --expect tools/expected-indicators.txt \
+            --rules rules/rules.yar \
             --notice NOTICE.txt \
             --out site/v1
 

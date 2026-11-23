@@ -19,6 +19,15 @@ List lines, sorted by the bytes of the name:
     name<TAB>>=1.0.0<1.2.0                from the first up to, not including, the second
 
 A third tab-separated field names the advisory (the lowest id when several).
+
+Indicator files are published with their `#` comment lines left out, so
+nothing is said about where they are kept. The build also stops if a
+published file names the private repository they come from: any file that
+gives its full "owner/name", or an indicator file that gives the name alone.
+The name alone is not looked for elsewhere, because anyone can publish a
+package under it and OSV would list it. It is read at run time from the
+INDICATOR_REPOSITORY environment variable, so it is never written in this
+public repository.
 """
 
 import argparse
@@ -144,6 +153,42 @@ def pack(data):
     return buffer.getvalue()
 
 
+def without_comments(text):
+    """The indicator lines of a file, each unchanged, with every `#` comment
+    line left out and each run of blank lines made one."""
+    kept = []
+    for line in text.split("\n"):
+        if line.lstrip().startswith("#"):
+            continue
+        if not line.strip():
+            if kept and kept[-1] != "":
+                kept.append("")
+            continue
+        kept.append(line)
+    while kept and kept[-1] == "":
+        kept.pop()
+    return "\n".join(kept) + "\n" if kept else ""
+
+
+def private_names():
+    """What the private indicator repository is called, to look for in what is
+    published: its full "owner/name" for every file, and that with the name
+    alone for the files that come from it. Both empty when it is not set."""
+    value = os.environ.get("INDICATOR_REPOSITORY", "").strip().lower()
+    if not value:
+        return [], []
+    tail = value.rsplit("/", 1)[-1]
+    return [value], sorted({value, tail} - {""})
+
+
+def refuse_if_named(names, data, shown):
+    # The name itself is never printed: the workflow's log is public. Nor is the
+    # name of an indicator file, which comes from the private repository too.
+    text = data.decode("utf-8", "replace").lower()
+    if any(name in text for name in names):
+        sys.exit("refusing to publish %s: it names the private indicator repository" % shown)
+
+
 def publish(out_dir, role, stem, extension, data, files):
     digest = hashlib.sha256(data).hexdigest()
     name = "%s.%s.%s" % (stem, digest[:12], extension)
@@ -185,6 +230,11 @@ def main():
         if missing:
             sys.exit("refusing to publish without these indicator files: %s" % ", ".join(missing))
 
+    # `full` for every file published; `own` for those that come from the private repository.
+    full, own = private_names()
+    if not full:
+        print("INDICATOR_REPOSITORY is not set, so the published files were not checked for its name", file=sys.stderr)
+
     os.makedirs(args.out, exist_ok=True)
     files = []
 
@@ -192,6 +242,7 @@ def main():
                                         ("malicious-pypi", args.pypi, "PyPI", "malicious-pypi")):
         found, skipped = collect(path, ecosystem)
         text = render(found, not args.no_advisories)
+        refuse_if_named(full, text, "the %s list" % ecosystem)
         packed = pack(text)
         name = publish(args.out, role, stem, "txt.gz", packed, files)
         print("%s: %d packages, %d bytes, %d packed -> %s  skipped %s"
@@ -204,28 +255,34 @@ def main():
             continue
         with open(os.path.join(args.indicators, base), "rb") as handle:
             data = handle.read()
-        data.decode("utf-8")
         for line in data.decode("utf-8").splitlines():
             if line.split("|")[0].strip() == "allow":
                 sys.exit("%s carries an allow line; allow-lists are private and are not published" % base)
+        # Comments say where the file is kept and who keeps it; the app skips them anyway.
+        data = without_comments(data.decode("utf-8")).encode("utf-8")
+        refuse_if_named(own, base.encode("utf-8") + b"\n" + data, "an indicator file")
         publish(args.out, "indicators", base[:-4], "ioc", data, files)
 
     if args.rules:
         with open(args.rules, "rb") as handle:
-            publish(args.out, "rules", "rules", "yar.gz", pack(handle.read()), files)
+            data = handle.read()
+        refuse_if_named(full, data, os.path.basename(args.rules))
+        publish(args.out, "rules", "rules", "yar.gz", pack(data), files)
 
     if args.notice:
         with open(args.notice, "rb") as handle:
             data = handle.read()
+        refuse_if_named(full, data, os.path.basename(args.notice))
         with open(os.path.join(args.out, "NOTICE.txt"), "wb") as handle:
             handle.write(data)
         files.append({"role": "notice", "name": "NOTICE.txt", "sha256": hashlib.sha256(data).hexdigest(),
                       "bytes": len(data)})
 
     manifest = {"format": FORMAT, "seq": seq, "created": created, "files": files}
+    text = json.dumps(manifest, indent=1, sort_keys=True) + "\n"
+    refuse_if_named(full, text.encode("utf-8"), "manifest.json")
     with open(os.path.join(args.out, "manifest.json"), "w", encoding="utf-8") as handle:
-        json.dump(manifest, handle, indent=1, sort_keys=True)
-        handle.write("\n")
+        handle.write(text)
     print("manifest: seq %d, %d files" % (seq, len(files)), file=sys.stderr)
 
 

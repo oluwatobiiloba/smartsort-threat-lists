@@ -1,0 +1,13 @@
+# Used only to check the malware rules compile (tools/build_rules.py --check).
+#
+# Policy: pin the oldest YARA-X that any released SmartSort embeds, never a
+# newer one. A rule this version accepts then compiles in every released app;
+# a rule that only a newer version accepts would be refused by older apps.
+# Move the pin up only once no released app embeds the older engine.
+#
+# Install with:
+#   pip install --require-hashes --only-binary=:all: -r tools/requirements-rules.txt
+# The hash is for the wheel GitHub's ubuntu-latest runner picks: yara_x-1.24.0-cp39-abi3-manylinux_2_28_x86_64.whl
+# (any Python 3.9 or later, Linux x86_64). Read from https://pypi.org/pypi/yara-x/1.24.0/json
+yara-x==1.24.0 \
+    --hash=sha256:47ebdf73da496f9140065f497e16cda1581773b27ea96406e213c1964094b398
