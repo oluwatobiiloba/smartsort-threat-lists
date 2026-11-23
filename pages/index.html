@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmartSort threat lists</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --bg: #ffffff; --fg: #111111; --muted: #555555; --line: #111111; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111111; --fg: #f2f2f2; --muted: #b0b0b0; --line: #f2f2f2; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 40rem; margin: 0 auto; padding: 3rem 1rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 1rem; }
+  h2 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+  p { margin: 0 0 1rem; }
+  .muted { color: var(--muted); }
+  ul { padding: 0; list-style: none; border: 1.5px solid var(--line); border-radius: 10px; }
+  li { padding: .75rem 1rem; border-top: 1.5px solid var(--line); }
+  li:first-child { border-top: 0; }
+  a { color: inherit; }
+  code { font: .92em ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SmartSort threat lists</h1>
+  <p>This address serves the lists of known developer threats that SmartSort, a Mac app,
+     can download. It isn't meant to be read in a browser: the app asks for the files below
+     by name, checks the manifest's signature, and ignores anything it can't verify.</p>
+  <p class="muted">Downloading is off in SmartSort until you turn it on. Requests carry no
+     identifier, and nothing about your files is ever sent.</p>
+
+  <h2>The current set</h2>
+  <ul>
+    <li><a href="/smartsort-threat-lists/v1/manifest.json"><code>v1/manifest.json</code></a><br>
+        <span class="muted">Which files are in the set, with each one's size and SHA-256.</span></li>
+    <li><a href="/smartsort-threat-lists/v1/manifest.json.sig"><code>v1/manifest.json.sig</code></a><br>
+        <span class="muted">The Ed25519 signature SmartSort checks before it uses anything.</span></li>
+    <li><a href="/smartsort-threat-lists/v1/NOTICE.txt"><code>v1/NOTICE.txt</code></a><br>
+        <span class="muted">Where each list and rule comes from, and its licence.</span></li>
+  </ul>
+
+  <h2>More</h2>
+  <p>How the lists are built, and the public keys:
+     <a href="https://github.com/oluwatobiiloba/smartsort-threat-lists">github.com/oluwatobiiloba/smartsort-threat-lists</a>.
+     The same files are also attached to its
+     <a href="https://github.com/oluwatobiiloba/smartsort-threat-lists/releases/tag/lists">“lists” release</a>.</p>
+  <p>SmartSort: <a href="https://smartsort-1pd.pages.dev/">smartsort-1pd.pages.dev</a></p>
+</main>
+</body>
+</html>
