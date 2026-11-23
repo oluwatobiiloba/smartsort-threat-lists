@@ -1,0 +1,10 @@
+# Built output and downloads never belong in the repository.
+/site/
+/osv/
+/indicator-source/
+*.zip
+# Private keys never belong here. Only keys/*.pub.pem is kept.
+*.pem
+!keys/*.pub.pem
+*.key
+ioc-deploy-key*

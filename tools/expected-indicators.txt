@@ -1,0 +1,5 @@
+# Indicator files the app ships with. The build stops if one is missing,
+# because a published set replaces the built-in one whole.
+polinrider-postcss
+shai-hulud
+vscode-extensions

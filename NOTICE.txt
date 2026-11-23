@@ -1,0 +1,25 @@
+SmartSort threat lists
+======================
+
+These files are data: lists of software packages and other marks that have
+been reported as malicious. They are built once a night from the sources
+below. Nothing here is a copy of malware.
+
+Malicious packages (malicious-npm.*.txt.gz, malicious-pypi.*.txt.gz)
+  Source: the OpenSSF Malicious Packages project,
+  https://github.com/ossf/malicious-packages, read through OSV
+  (https://osv.dev). Licensed under the Apache License, Version 2.0:
+  https://www.apache.org/licenses/LICENSE-2.0
+  Changes made: records marked withdrawn are left out, and each remaining
+  record is reduced to a package name, the affected versions and the id of
+  its advisory.
+  Many of these reports come from the GitHub Advisory Database
+  (https://github.com/advisories), which is licensed CC BY 4.0, and from the
+  security researchers credited in each advisory.
+
+Indicators (*.ioc)
+  Written for SmartSort and its sister tool from public write-ups of
+  particular attacks. Each line names what it is and where it was described.
+
+A list is a record of what has been reported, not a guarantee. A package
+that is not listed has not been shown to be safe, and a listing can be wrong.

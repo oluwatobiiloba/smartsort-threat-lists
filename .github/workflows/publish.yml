@@ -1,0 +1,193 @@
+# Builds SmartSort's threat lists once a night and publishes them, signed.
+#
+# Three things have to be set up once, by the repository's owner:
+#   1. Settings > Pages > Source: "GitHub Actions".
+#   2. Settings > Environments > "signing": deployment branches limited to
+#      `main`, with the secret LISTS_SIGNING_KEY (the Ed25519 private key, PEM).
+#   3. Settings > Secrets and variables > Actions: the secret IOC_DEPLOY_KEY, a
+#      read-only deploy key for the private repository that holds the curated
+#      indicators, and the variable INDICATOR_REPOSITORY, that repository's
+#      owner/name (kept out of this public file).
+name: Publish lists
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  OSV_NPM: https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip
+  OSV_PYPI: https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check the setup
+        # Left empty, the next step would quietly check out this repository instead.
+        env:
+          INDICATOR_REPOSITORY: ${{ vars.INDICATOR_REPOSITORY }}
+        run: test -n "$INDICATOR_REPOSITORY" || { echo "::error::The variable INDICATOR_REPOSITORY is not set"; exit 1; }
+
+      - name: Fetch the curated indicators (read-only)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ vars.INDICATOR_REPOSITORY }}
+          ref: main
+          ssh-key: ${{ secrets.IOC_DEPLOY_KEY }}
+          path: indicator-source
+          sparse-checkout: iocs
+          persist-credentials: false
+
+      - name: Fetch the OSV exports
+        run: |
+          mkdir -p osv/npm osv/pypi
+          curl --fail --silent --show-error --location --retry 3 --max-filesize 1500000000 -o osv/npm/all.zip "$OSV_NPM"
+          curl --fail --silent --show-error --location --retry 3 --max-filesize 1500000000 -o osv/pypi/all.zip "$OSV_PYPI"
+
+      - name: Build the lists
+        # -I: the script is run without reading anything from the folders the downloads are in.
+        run: |
+          python3 -I tools/build_lists.py \
+            --npm osv/npm/all.zip --pypi osv/pypi/all.zip \
+            --indicators indicator-source/iocs \
+            --expect tools/expected-indicators.txt \
+            --notice NOTICE.txt \
+            --out site/v1
+
+      - name: Refuse to go backwards
+        # The app ignores a manifest whose number is not higher than the one it has.
+        # Both addresses the app reads from are checked; either may be the one that is up.
+        run: |
+          new=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["seq"])' site/v1/manifest.json)
+          seen=0
+          for url in \
+            "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/v1/manifest.json" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/lists/manifest.json"; do
+            rm -f published.json
+            if curl --fail --silent --location --proto '=https' --proto-redir '=https' --max-filesize 65536 \
+                 -o published.json "$url"; then
+              old=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["seq"])' published.json)
+              echo "$url: published $old, new $new"
+              [ "$new" -gt "$old" ] || { echo "::error::$url already has $old"; exit 1; }
+              seen=1
+            else
+              echo "$url: nothing readable"
+            fi
+          done
+          [ "$seen" = 1 ] || echo "nothing published yet; new $new"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned
+          path: site
+          retention-days: 3
+
+  sign:
+    needs: build
+    runs-on: ubuntu-latest
+    # The key lives in this environment only, and the environment only runs for `main`.
+    environment: signing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: keys
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unsigned
+          path: site
+
+      - name: Sign the manifest
+        env:
+          LISTS_SIGNING_KEY: ${{ secrets.LISTS_SIGNING_KEY }}
+        run: |
+          umask 077
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$LISTS_SIGNING_KEY" > "$key"
+          openssl pkeyutl -sign -rawin -inkey "$key" -in site/v1/manifest.json -out manifest.sig.raw
+          # Check it against the public key in this repository: a wrong secret stops here.
+          openssl pkeyutl -verify -rawin -pubin -inkey keys/primary.pub.pem \
+            -in site/v1/manifest.json -sigfile manifest.sig.raw
+          base64 -w0 manifest.sig.raw > site/v1/manifest.json.sig
+          test "$(wc -c < manifest.sig.raw)" -eq 64
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed
+          path: site
+          retention-days: 3
+
+  pages:
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed
+          path: site
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  release:
+    # The same files again as a release, the second address the app tries.
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed
+          path: site
+      - name: Replace the release's files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view lists >/dev/null 2>&1 || gh release create lists --title "Threat lists" \
+            --notes "The current lists, the same files GitHub Pages serves. Replaced every night."
+          # The manifest goes last: until it is replaced, the old one still names files that are there.
+          find site/v1 -type f ! -name 'manifest.json*' -print0 | xargs -0 gh release upload lists --clobber
+          gh release upload lists --clobber site/v1/manifest.json.sig site/v1/manifest.json
+          keep=$(cd site/v1 && ls)
+          gh release view lists --json assets --jq '.assets[].name' | while read -r name; do
+            echo "$keep" | grep -qxF "$name" || gh release delete-asset lists "$name" --yes
+          done
+
+  keep-schedule:
+    # GitHub stops a public repository's nightly schedule after 60 days without
+    # a commit, and this repository gets none. Switching the workflow on again
+    # starts that count over. It runs on its own, so a night that fails to
+    # publish does not let the schedule lapse.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow enable publish.yml
